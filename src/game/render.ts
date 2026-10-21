@@ -4,8 +4,6 @@ const WALL_BG = "#1C2327";
 const WALL_BRICK = "#2E3B41";
 const PATH_BG = "#78909C";
 const PATH_DETAIL = "#8EA3AD";
-const PLAYER_GLOW = "#FFCA28";
-const PLAYER_CORE = "#FFF8E1";
 const GOAL_GLOW = "#43A047";
 const GOAL_FLAG = "#FFF59D";
 const ARROW_BG = "#37474F";
@@ -16,6 +14,15 @@ const HUNTING_BG = "#7A1F1F";
 const MONSTER_BODY = "#8E24AA";
 const MONSTER_EYE = "#FF1744";
 const CAUGHT_BG = "#B71C1C";
+
+// The hero: a small hooded adventurer seen from above, in the spirit of classic top-down
+// adventure games but with its own palette and proportions.
+const HERO_HOOD = "#2E7D32";
+const HERO_HOOD_LIGHT = "#81C784";
+const HERO_FACE = "#FFCC99";
+const HERO_TUNIC = "#388E3C";
+const HERO_BELT = "#4E342E";
+const HERO_BOOT = "#3E2723";
 
 function toDataUri(svg: string): string {
   return `data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}`;
@@ -43,9 +50,15 @@ function pathGlyph(): string {
     <circle cx="104" cy="44" r="3" fill="${PATH_DETAIL}" opacity="0.4"/>`;
 }
 
-function playerGlyph(): string {
-  return `<circle cx="72" cy="72" r="28" fill="${PLAYER_GLOW}"/>
-    <circle cx="72" cy="72" r="14" fill="${PLAYER_CORE}"/>`;
+function heroGlyph(): string {
+  return `<path d="M72 36 L90 60 Q72 55 54 60 Z" fill="${HERO_HOOD}"/>
+    <circle cx="72" cy="64" r="15" fill="${HERO_HOOD}"/>
+    <circle cx="72" cy="38" r="4" fill="${HERO_HOOD_LIGHT}"/>
+    <rect x="61" y="66" width="22" height="11" rx="5.5" fill="${HERO_FACE}"/>
+    <path d="M54 80 Q72 73 90 80 L94 106 Q72 113 50 106 Z" fill="${HERO_TUNIC}"/>
+    <rect x="57" y="97" width="30" height="6" fill="${HERO_BELT}"/>
+    <rect x="57" y="104" width="11" height="9" rx="3" fill="${HERO_BOOT}"/>
+    <rect x="76" y="104" width="11" height="9" rx="3" fill="${HERO_BOOT}"/>`;
 }
 
 function goalGlyph(): string {
@@ -69,7 +82,7 @@ export function pathFrame(): string {
 }
 
 export function playerFrame(): string {
-  return toDataUri(cellWrap(PATH_BG, pathGlyph() + playerGlyph()));
+  return toDataUri(cellWrap(PATH_BG, pathGlyph() + heroGlyph()));
 }
 
 export function goalFrame(): string {
@@ -122,4 +135,56 @@ export function caughtStatusFrame(): string {
   const body = `${monsterGlyph()}
     <text x="72" y="124" font-family="Segoe UI, sans-serif" font-size="20" font-weight="800" text-anchor="middle" fill="#FFFFFF">CAUGHT!</text>`;
   return toDataUri(cellWrap(CAUGHT_BG, body));
+}
+
+// --- Level / difficulty tier --------------------------------------------------
+
+export type Tier = "easy" | "normal" | "hard" | "extreme";
+
+const TIER_BG: Record<Tier, string> = {
+  easy: "#2E7D32",
+  normal: "#B8860B",
+  hard: "#B71C1C",
+  extreme: "#4A148C",
+};
+const TIER_GLOW: Record<Tier, string | undefined> = {
+  easy: undefined,
+  normal: undefined,
+  hard: undefined,
+  extreme: "#FFD700",
+};
+const TIER_LABEL: Record<Tier, string> = {
+  easy: "EASY",
+  normal: "NORMAL",
+  hard: "HARD",
+  extreme: "EXTREME",
+};
+
+function badgeGlyph(): string {
+  return `<path d="M72 26 L90 46 L72 66 L54 46 Z" fill="#FFFFFF" opacity="0.92"/>`;
+}
+
+export function levelFrame(level: number, tier: Tier): string {
+  const body = `${badgeGlyph()}
+    <text x="72" y="98" font-family="Segoe UI, sans-serif" font-size="17" font-weight="800" text-anchor="middle" fill="#FFFFFF">LEVEL</text>
+    <text x="72" y="130" font-family="Segoe UI, sans-serif" font-size="30" font-weight="800" text-anchor="middle" fill="#FFFFFF">${level}</text>`;
+  return toDataUri(cellWrap(TIER_BG[tier], body, TIER_GLOW[tier]));
+}
+
+function sparkleGlyph(): string {
+  return `<path d="M40 26 L45 38 L57 43 L45 48 L40 60 L35 48 L23 43 L35 38 Z" fill="#FFFFFF" opacity="0.9"/>
+    <path d="M106 80 L110 90 L120 94 L110 98 L106 108 L102 98 L92 94 L102 90 Z" fill="#FFFFFF" opacity="0.75"/>
+    <circle cx="104" cy="34" r="4" fill="#FFFFFF" opacity="0.65"/>
+    <circle cx="32" cy="98" r="3.5" fill="#FFFFFF" opacity="0.55"/>`;
+}
+
+export function celebrationFrame(tier: Tier): string {
+  return toDataUri(cellWrap(TIER_BG[tier], sparkleGlyph(), "#FFFFFF"));
+}
+
+export function tierUpFrame(tier: Tier): string {
+  const body = `${sparkleGlyph()}
+    <text x="72" y="96" font-family="Segoe UI, sans-serif" font-size="16" font-weight="800" text-anchor="middle" fill="#FFFFFF">LEVEL UP!</text>
+    <text x="72" y="124" font-family="Segoe UI, sans-serif" font-size="19" font-weight="800" text-anchor="middle" fill="#FFFFFF">${TIER_LABEL[tier]}</text>`;
+  return toDataUri(cellWrap(TIER_BG[tier], body, "#FFFFFF"));
 }

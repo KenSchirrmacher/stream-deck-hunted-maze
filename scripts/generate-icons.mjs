@@ -51,6 +51,10 @@ const statusActionBody = `
   <rect x="33" y="18" width="6" height="26" fill="#CFD8DC"/>
   <path d="M39 22 L54 29 L39 36 Z" fill="#FFF59D"/>`;
 
+const levelActionBody = `
+  <rect x="12" y="12" width="48" height="48" rx="10" fill="#2E7D32" stroke="#2E3B41" stroke-width="2.5"/>
+  <path d="M36 20 L48 32 L36 44 L24 32 Z" fill="#FFFFFF" opacity="0.92"/>`;
+
 function arrow(direction) {
   const paths = {
     up: "M36 18 L52 43 L41 43 L41 54 L31 54 L31 43 L20 43 Z",
@@ -66,6 +70,7 @@ await writeIcon("plugin", "plugin-icon", pluginBody, [256, 512]);
 await writeIcon("plugin", "category-icon", categoryBody, [28, 56]);
 await writeIcon("actions/cell", "icon", cellActionBody);
 await writeIcon("actions/status", "icon", statusActionBody);
+await writeIcon("actions/level", "icon", levelActionBody);
 await writeIcon("actions/moveup", "icon", arrow("up"));
 await writeIcon("actions/movedown", "icon", arrow("down"));
 await writeIcon("actions/moveleft", "icon", arrow("left"));

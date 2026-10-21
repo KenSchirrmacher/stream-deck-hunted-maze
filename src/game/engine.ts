@@ -1,33 +1,25 @@
 import streamDeck, { type KeyAction } from "@elgato/streamdeck";
 import {
   caughtStatusFrame,
+  celebrationFrame,
   directionFrame,
   goalFrame,
+  levelFrame,
   monsterFrame,
   pathFrame,
   playerFrame,
   statusFrame,
+  tierUpFrame,
   wallFrame,
   winStatusFrame,
   type Direction,
+  type Tier,
 } from "./render.js";
 
 const APPEAR_DEBOUNCE_MS = 400;
 const END_RESET_MS = 3_500;
 const MIN_WIDTH = 4;
 const MIN_HEIGHT = 3;
-
-// Maze is generated at a fixed size, larger than any reasonable viewport, so the
-// camera has real room to scroll. Rooms sit on odd coordinates; walls carve between them.
-const ROOMS_X = 7;
-const ROOMS_Y = 5;
-const MAZE_W = ROOMS_X * 2 + 1;
-const MAZE_H = ROOMS_Y * 2 + 1;
-
-// How close (in maze steps, not straight-line) the hunter must get to notice the
-// player and start hunting, and how far the player must pull ahead before it gives up.
-const SENSE_RADIUS = 6;
-const LOSE_TRACK_RADIUS = 9;
 
 type RegisteredCell = {
   action: KeyAction;
@@ -49,6 +41,7 @@ type Phase = "playing" | "win" | "caught";
 type DeviceState = {
   viewport: Viewport;
   statusAction: KeyAction | null;
+  levelAction: KeyAction | null;
   directionActions: Partial<Record<Direction, KeyAction>>;
   gameStarted: boolean;
   maze: boolean[];
@@ -63,6 +56,12 @@ type DeviceState = {
   monsterPrevRow: number;
   monsterPrevCol: number;
   hunting: boolean;
+  senseRadius: number;
+  loseTrackRadius: number;
+  trackChance: number;
+  doubleStepChance: number;
+  level: number;
+  celebratingTier: Tier | null;
   moves: number;
   phase: Phase;
   resetTimer: ReturnType<typeof setTimeout> | null;
@@ -72,6 +71,7 @@ function freshState(): DeviceState {
   return {
     viewport: { cells: new Map(), order: [], width: 0, height: 0, started: false, appearDebounce: null },
     statusAction: null,
+    levelAction: null,
     directionActions: {},
     gameStarted: false,
     maze: [],
@@ -86,6 +86,12 @@ function freshState(): DeviceState {
     monsterPrevRow: 0,
     monsterPrevCol: 0,
     hunting: false,
+    senseRadius: 2,
+    loseTrackRadius: 8,
+    trackChance: 0.15,
+    doubleStepChance: 0,
+    level: 1,
+    celebratingTier: null,
     moves: 0,
     phase: "playing",
     resetTimer: null,
@@ -100,13 +106,83 @@ function shuffle<T>(arr: T[]): T[] {
   return arr;
 }
 
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max);
+}
+
+// --- Difficulty progression -----------------------------------------------------
+// Levels 1-10 are easy, 11-30 normal, 31-100 hard, 101+ extreme. Within that, several
+// knobs ramp continuously with level so the climb feels gradual rather than four flat steps:
+// the maze grows, the hunter senses you from farther away, takes longer to lose your scent,
+// starts closer to you, and -- once hard/extreme -- has a chance to take a bonus step each
+// turn while actively hunting.
+export function tierFor(level: number): Tier {
+  if (level <= 10) return "easy";
+  if (level <= 30) return "normal";
+  if (level <= 100) return "hard";
+  return "extreme";
+}
+
+type Scale = {
+  roomsX: number;
+  roomsY: number;
+  senseRadius: number;
+  loseTrackRadius: number;
+  spawnThresholdFrac: number;
+  trackChance: number;
+  doubleStepChance: number;
+};
+
+function scaleForLevel(level: number): Scale {
+  const tier = tierFor(level);
+  const roomsX = clamp(6 + Math.floor((level - 1) / 10), 6, 13);
+  const roomsY = clamp(4 + Math.floor((level - 1) / 14), 4, 8);
+
+  let senseRadius: number;
+  if (level <= 10) senseRadius = 2;
+  else if (level <= 30) senseRadius = 2 + Math.floor((level - 10) / 10);
+  else if (level <= 100) senseRadius = 4 + Math.floor((level - 30) / 18);
+  else senseRadius = clamp(8 + Math.floor((level - 100) / 15), 8, 13);
+
+  const loseTrackGap = clamp(6 - Math.floor((level - 1) / 30), 2, 6);
+
+  let spawnThresholdFrac: number;
+  if (level <= 10) spawnThresholdFrac = 0.9;
+  else if (level <= 30) spawnThresholdFrac = 0.9 - (level - 10) * 0.0075;
+  else if (level <= 100) spawnThresholdFrac = 0.75 - (level - 30) * 0.0036;
+  else spawnThresholdFrac = clamp(0.5 - (level - 100) * 0.0008, 0.3, 0.5);
+
+  // How often, on a turn where the hunter has sensed the player, it actually takes the
+  // optimal pursuit step rather than just wandering -- being noticed isn't an instant
+  // death sentence, especially early on, since a perfect pursuer on a maze (a tree: exactly
+  // one path between any two points) will eventually corner anyone given enough turns.
+  let trackChance: number;
+  if (level <= 10) trackChance = 0.15;
+  else if (level <= 30) trackChance = 0.15 + (level - 10) * 0.01;
+  else if (level <= 100) trackChance = 0.35 + (level - 30) * 0.0043;
+  else trackChance = clamp(0.65 + (level - 100) * 0.005, 0.65, 0.9);
+
+  const doubleStepChance = tier === "hard" ? 0.06 : tier === "extreme" ? 0.18 : 0;
+  return {
+    roomsX,
+    roomsY,
+    senseRadius,
+    loseTrackRadius: senseRadius + loseTrackGap,
+    spawnThresholdFrac,
+    trackChance,
+    doubleStepChance,
+  };
+}
+
 /** Randomized depth-first "recursive backtracker" maze, carved onto a cell grid where odd rows/cols are rooms. */
-function generateMaze(): boolean[] {
-  const maze = new Array<boolean>(MAZE_W * MAZE_H).fill(false);
-  const visited = new Array<boolean>(ROOMS_X * ROOMS_Y).fill(false);
+function generateMaze(roomsX: number, roomsY: number): { maze: boolean[]; width: number; height: number } {
+  const width = roomsX * 2 + 1;
+  const height = roomsY * 2 + 1;
+  const maze = new Array<boolean>(width * height).fill(false);
+  const visited = new Array<boolean>(roomsX * roomsY).fill(false);
   const stack: Array<[number, number]> = [[0, 0]];
   visited[0] = true;
-  maze[1 * MAZE_W + 1] = true;
+  maze[1 * width + 1] = true;
 
   while (stack.length > 0) {
     const [rx, ry] = stack[stack.length - 1];
@@ -115,7 +191,7 @@ function generateMaze(): boolean[] {
       [rx, ry + 1],
       [rx - 1, ry],
       [rx + 1, ry],
-    ]).filter(([nx, ny]) => nx >= 0 && nx < ROOMS_X && ny >= 0 && ny < ROOMS_Y && !visited[ny * ROOMS_X + nx]);
+    ]).filter(([nx, ny]) => nx >= 0 && nx < roomsX && ny >= 0 && ny < roomsY && !visited[ny * roomsX + nx]);
 
     if (neighbors.length === 0) {
       stack.pop();
@@ -123,15 +199,15 @@ function generateMaze(): boolean[] {
     }
 
     const [nx, ny] = neighbors[0];
-    visited[ny * ROOMS_X + nx] = true;
+    visited[ny * roomsX + nx] = true;
     const wallRow = ry + ny + 1;
     const wallCol = rx + nx + 1;
-    maze[wallRow * MAZE_W + wallCol] = true;
-    maze[(2 * ny + 1) * MAZE_W + (2 * nx + 1)] = true;
+    maze[wallRow * width + wallCol] = true;
+    maze[(2 * ny + 1) * width + (2 * nx + 1)] = true;
     stack.push([nx, ny]);
   }
 
-  return maze;
+  return { maze, width, height };
 }
 
 /** BFS distance (in steps) from (fromRow, fromCol) to every reachable open cell. -1 where unreachable. */
@@ -210,6 +286,19 @@ class GameEngine {
     this.maybeTeardown(deviceId, state);
   }
 
+  registerLevel(deviceId: string, action: KeyAction): void {
+    const state = this.getOrCreate(deviceId);
+    state.levelAction = action;
+    this.renderLevel(state);
+  }
+
+  unregisterLevel(deviceId: string, actionId: string): void {
+    const state = this.devices.get(deviceId);
+    if (!state || !state.levelAction || state.levelAction.id !== actionId) return;
+    state.levelAction = null;
+    this.maybeTeardown(deviceId, state);
+  }
+
   registerDirection(deviceId: string, direction: Direction, action: KeyAction): void {
     const state = this.getOrCreate(deviceId);
     state.directionActions[direction] = action;
@@ -248,9 +337,14 @@ class GameEngine {
     state.moves++;
 
     if (nr === state.goalRow && nc === state.goalCol) {
+      const prevTier = tierFor(state.level);
+      state.level++;
+      const newTier = tierFor(state.level);
+      state.celebratingTier = newTier !== prevTier ? newTier : null;
       state.phase = "win";
       this.renderViewport(state);
       this.renderStatus(state);
+      this.renderLevel(state);
       state.resetTimer = setTimeout(() => this.newGame(state), END_RESET_MS);
       return;
     }
@@ -260,7 +354,8 @@ class GameEngine {
       state.phase = "caught";
       this.renderViewport(state);
       this.renderStatus(state);
-      state.resetTimer = setTimeout(() => this.newGame(state), END_RESET_MS);
+      this.renderLevel(state);
+      state.resetTimer = setTimeout(() => this.newGame(state, true), END_RESET_MS);
       return;
     }
 
@@ -270,22 +365,35 @@ class GameEngine {
 
   // --- Monster AI ----------------------------------------------------------------
 
-  /** Advances the hunter one step and reports whether it landed on the player. */
+  /** Advances the hunter one step (plus a possible bonus step while hunting), reporting whether it landed on the player. */
   private stepMonster(state: DeviceState): boolean {
+    if (this.stepMonsterOnce(state)) return true;
+    if (state.hunting && Math.random() < state.doubleStepChance) {
+      return this.stepMonsterOnce(state);
+    }
+    return false;
+  }
+
+  private stepMonsterOnce(state: DeviceState): boolean {
     const distToPlayer = bfsDistanceField(state.maze, state.mazeW, state.mazeH, state.playerRow, state.playerCol);
     const monsterDist = distToPlayer[state.monsterRow * state.mazeW + state.monsterCol];
 
-    if (monsterDist >= 0 && monsterDist <= SENSE_RADIUS) {
+    if (monsterDist >= 0 && monsterDist <= state.senseRadius) {
       state.hunting = true;
-    } else if (state.hunting && (monsterDist < 0 || monsterDist > LOSE_TRACK_RADIUS)) {
+    } else if (state.hunting && (monsterDist < 0 || monsterDist > state.loseTrackRadius)) {
       state.hunting = false;
     }
 
     const neighbors = openNeighbors(state.maze, state.mazeW, state.mazeH, state.monsterRow, state.monsterCol);
     if (neighbors.length === 0) return false;
 
+    // Sensing the player doesn't guarantee a pursuit step: a perfect pursuer on a maze (a
+    // tree -- exactly one path between any two points) would eventually corner anyone given
+    // enough turns, so trackChance keeps "noticed" from being an automatic death sentence.
+    const pursuing = state.hunting && Math.random() < state.trackChance;
+
     let next: [number, number];
-    if (state.hunting) {
+    if (pursuing) {
       next = neighbors.reduce((best, cand) => {
         const bestDist = distToPlayer[best[0] * state.mazeW + best[1]];
         const candDist = distToPlayer[cand[0] * state.mazeW + cand[1]];
@@ -295,9 +403,9 @@ class GameEngine {
         return best;
       }, neighbors[0]);
     } else {
-      const notBacktrack = neighbors.filter(([r, c]) => r !== state.monsterPrevRow || c !== state.monsterPrevCol);
-      const pool = notBacktrack.length > 0 ? notBacktrack : neighbors;
-      next = pool[Math.floor(Math.random() * pool.length)];
+      // A true random walk (backtracking allowed) -- it diffuses through the maze slowly
+      // rather than sweeping it like a search algorithm, so idle wandering stays local.
+      next = neighbors[Math.floor(Math.random() * neighbors.length)];
     }
 
     state.monsterPrevRow = state.monsterRow;
@@ -313,6 +421,15 @@ class GameEngine {
   private renderViewport(state: DeviceState): void {
     const { width, height } = state.viewport;
     if (width === 0 || height === 0) return;
+
+    if (state.celebratingTier) {
+      const image = celebrationFrame(state.celebratingTier);
+      for (const id of state.viewport.order) {
+        const cell = state.viewport.cells.get(id);
+        if (cell) void cell.action.setImage(image);
+      }
+      return;
+    }
 
     const camRow = clamp(state.playerRow - Math.floor(height / 2), 0, Math.max(0, state.mazeH - height));
     const camCol = clamp(state.playerCol - Math.floor(width / 2), 0, Math.max(0, state.mazeW - width));
@@ -358,6 +475,14 @@ class GameEngine {
     );
   }
 
+  private renderLevel(state: DeviceState): void {
+    if (!state.levelAction) return;
+    const image = state.celebratingTier ? tierUpFrame(state.celebratingTier) : levelFrame(state.level, tierFor(state.level));
+    void state.levelAction.setImage(image).catch((err) =>
+      streamDeck.logger.error(`huntedmaze: setImage(level) failed: ${String(err)}`),
+    );
+  }
+
   // --- Lifecycle --------------------------------------------------------------
 
   private scheduleViewportStart(state: DeviceState): void {
@@ -397,22 +522,32 @@ class GameEngine {
     }, APPEAR_DEBOUNCE_MS);
   }
 
-  private newGame(state: DeviceState): void {
+  private newGame(state: DeviceState, resetLevel = false): void {
     if (state.resetTimer) clearTimeout(state.resetTimer);
     state.resetTimer = null;
 
-    state.maze = generateMaze();
-    state.mazeW = MAZE_W;
-    state.mazeH = MAZE_H;
+    if (resetLevel) state.level = 1;
+    state.celebratingTier = null;
+
+    const scale = scaleForLevel(state.level);
+    const { maze, width, height } = generateMaze(scale.roomsX, scale.roomsY);
+    state.maze = maze;
+    state.mazeW = width;
+    state.mazeH = height;
+    state.senseRadius = scale.senseRadius;
+    state.loseTrackRadius = scale.loseTrackRadius;
+    state.trackChance = scale.trackChance;
+    state.doubleStepChance = scale.doubleStepChance;
     state.playerRow = 1;
     state.playerCol = 1;
-    state.goalRow = MAZE_H - 2;
-    state.goalCol = MAZE_W - 2;
+    state.goalRow = height - 2;
+    state.goalCol = width - 2;
     state.moves = 0;
     state.hunting = false;
     state.phase = "playing";
 
-    // Spawn the hunter somewhere well away from the player, so there's a real head start.
+    // Spawn the hunter somewhere well away from the player; the threshold tightens as
+    // the level climbs, giving progressively less of a head start.
     const distFromPlayer = bfsDistanceField(state.maze, state.mazeW, state.mazeH, state.playerRow, state.playerCol);
     let farthest = 0;
     for (let i = 0; i < distFromPlayer.length; i++) farthest = Math.max(farthest, distFromPlayer[i]);
@@ -421,7 +556,7 @@ class GameEngine {
       for (let c = 0; c < state.mazeW; c++) {
         if (r === state.goalRow && c === state.goalCol) continue;
         const d = distFromPlayer[r * state.mazeW + c];
-        if (d >= farthest * 0.6) candidates.push([r, c]);
+        if (d >= farthest * scale.spawnThresholdFrac) candidates.push([r, c]);
       }
     }
     const [mr, mc] = candidates.length > 0 ? candidates[Math.floor(Math.random() * candidates.length)] : [state.goalRow, state.goalCol];
@@ -432,10 +567,11 @@ class GameEngine {
 
     this.renderViewport(state);
     this.renderStatus(state);
+    this.renderLevel(state);
   }
 
   private maybeTeardown(deviceId: string, state: DeviceState): void {
-    if (state.viewport.cells.size > 0 || state.statusAction || Object.keys(state.directionActions).length > 0) return;
+    if (state.viewport.cells.size > 0 || state.statusAction || state.levelAction || Object.keys(state.directionActions).length > 0) return;
     if (state.viewport.appearDebounce) clearTimeout(state.viewport.appearDebounce);
     if (state.resetTimer) clearTimeout(state.resetTimer);
     this.devices.delete(deviceId);
@@ -449,10 +585,6 @@ class GameEngine {
     }
     return state;
   }
-}
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(Math.max(value, min), max);
 }
 
 export const gameEngine = new GameEngine();

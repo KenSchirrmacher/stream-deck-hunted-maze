@@ -63,6 +63,21 @@
       ]
     },
     {
+      "Name": "Level",
+      "UUID": "com.homedeck.huntedmaze.level",
+      "Icon": "imgs/actions/level/icon",
+      "Tooltip": "Tracks your current level and difficulty tier -- green for easy (1-10), yellow for normal (11-30), red for hard (31-100), and purple for extreme (101+). Resets to 1 if the hunter catches you. Place next to the Status key.",
+      "Controllers": [
+        "Keypad"
+      ],
+      "States": [
+        {
+          "Image": "imgs/actions/level/icon",
+          "ShowTitle": false
+        }
+      ]
+    },
+    {
       "Name": "Move Up",
       "UUID": "com.homedeck.huntedmaze.moveup",
       "Icon": "imgs/actions/moveup/icon",
