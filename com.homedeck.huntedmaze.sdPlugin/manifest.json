@@ -1,0 +1,126 @@
+{
+  "$schema": "https://schemas.elgato.com/streamdeck/plugins/manifest.json",
+  "Name": "Hunted Maze",
+  "Version": "1.0.0.0",
+  "Author": "Home Deck",
+  "Description": "A randomly generated maze -- and you're not alone in it. Something wanders the dark corridors, and once it catches your scent it won't stop hunting until it catches you or you shake it. Reach the glowing goal first.",
+  "Icon": "imgs/plugin/plugin-icon",
+  "Category": "Hunted Maze",
+  "CategoryIcon": "imgs/plugin/category-icon",
+  "CodePath": "bin/plugin.js",
+  "DefaultWindowSize": [
+    420,
+    420
+  ],
+  "UUID": "com.homedeck.huntedmaze",
+  "SDKVersion": 3,
+  "Software": {
+    "MinimumVersion": "6.9"
+  },
+  "Nodejs": {
+    "Version": "20",
+    "Debug": "enabled"
+  },
+  "OS": [
+    {
+      "Platform": "windows",
+      "MinimumVersion": "10"
+    },
+    {
+      "Platform": "mac",
+      "MinimumVersion": "10.15"
+    }
+  ],
+  "Actions": [
+    {
+      "Name": "Cell",
+      "UUID": "com.homedeck.huntedmaze.cell",
+      "Icon": "imgs/actions/cell/icon",
+      "Tooltip": "One square of the scrolling maze viewport. Place these in a solid rectangular block on a folder page -- the camera follows your player and scrolls this window to keep up (6 wide x 3 tall is a good size, leaving room for the D-pad and status key).",
+      "Controllers": [
+        "Keypad"
+      ],
+      "States": [
+        {
+          "Image": "imgs/actions/cell/icon",
+          "ShowTitle": false
+        }
+      ]
+    },
+    {
+      "Name": "Status",
+      "UUID": "com.homedeck.huntedmaze.status",
+      "Icon": "imgs/actions/status/icon",
+      "Tooltip": "Shows your move count, and warns you when the hunter is close. Flashes green if you reach the goal, red if it catches you.",
+      "Controllers": [
+        "Keypad"
+      ],
+      "States": [
+        {
+          "Image": "imgs/actions/status/icon",
+          "ShowTitle": false
+        }
+      ]
+    },
+    {
+      "Name": "Move Up",
+      "UUID": "com.homedeck.huntedmaze.moveup",
+      "Icon": "imgs/actions/moveup/icon",
+      "Tooltip": "Steps your player one cell up, if the maze allows it. Part of the 4-key D-pad.",
+      "Controllers": [
+        "Keypad"
+      ],
+      "States": [
+        {
+          "Image": "imgs/actions/moveup/icon",
+          "ShowTitle": false
+        }
+      ]
+    },
+    {
+      "Name": "Move Down",
+      "UUID": "com.homedeck.huntedmaze.movedown",
+      "Icon": "imgs/actions/movedown/icon",
+      "Tooltip": "Steps your player one cell down, if the maze allows it. Part of the 4-key D-pad.",
+      "Controllers": [
+        "Keypad"
+      ],
+      "States": [
+        {
+          "Image": "imgs/actions/movedown/icon",
+          "ShowTitle": false
+        }
+      ]
+    },
+    {
+      "Name": "Move Left",
+      "UUID": "com.homedeck.huntedmaze.moveleft",
+      "Icon": "imgs/actions/moveleft/icon",
+      "Tooltip": "Steps your player one cell left, if the maze allows it. Part of the 4-key D-pad.",
+      "Controllers": [
+        "Keypad"
+      ],
+      "States": [
+        {
+          "Image": "imgs/actions/moveleft/icon",
+          "ShowTitle": false
+        }
+      ]
+    },
+    {
+      "Name": "Move Right",
+      "UUID": "com.homedeck.huntedmaze.moveright",
+      "Icon": "imgs/actions/moveright/icon",
+      "Tooltip": "Steps your player one cell right, if the maze allows it. Part of the 4-key D-pad.",
+      "Controllers": [
+        "Keypad"
+      ],
+      "States": [
+        {
+          "Image": "imgs/actions/moveright/icon",
+          "ShowTitle": false
+        }
+      ]
+    }
+  ]
+}

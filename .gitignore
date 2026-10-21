@@ -1,0 +1,8 @@
+node_modules/
+*.log
+.DS_Store
+Thumbs.db
+com.homedeck.huntedmaze.sdPlugin/logs/
+com.homedeck.huntedmaze.sdPlugin/bin/
+com.homedeck.huntedmaze.sdPlugin/imgs/
+*.streamDeckPlugin
